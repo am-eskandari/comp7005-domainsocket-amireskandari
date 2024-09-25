@@ -5,7 +5,7 @@ import struct
 import signal
 import sys
 
-CHUNK_SIZE = 1024  # Read and send data in 1024-byte chunks
+CHUNK_SIZE = 1024
 exit_flag = False
 
 def signal_handler(signum, frame):

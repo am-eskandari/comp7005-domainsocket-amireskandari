@@ -4,8 +4,10 @@ import struct
 import os
 import mimetypes
 import sys
+import errno
 
-CHUNK_SIZE = 1024  # Send and receive data in 1024-byte chunks
+CHUNK_SIZE = 1024
+TIMEOUT = 5
 
 
 def parse_arguments():
@@ -17,10 +19,27 @@ def parse_arguments():
 
 def connect_to_server(socket_path):
     client_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+    client_socket.settimeout(TIMEOUT)
+
     try:
+        if not os.path.exists(socket_path):
+            raise FileNotFoundError(f"Error: Socket file {socket_path} does not exist.")
+
         client_socket.connect(socket_path)
+    except FileNotFoundError as e:
+        print(e)
+        sys.exit(1)
+    except socket.timeout:
+        print(f"Error: Connection to server timed out after {TIMEOUT} seconds.")
+        sys.exit(1)
     except socket.error as e:
-        print(f"Connection failed: {e}")
+        if e.errno == errno.ECONNREFUSED:
+            print(f"Error: No server running at {socket_path}. Connection refused.")
+        elif e.errno == errno.ENOENT:
+            print(f"Error: Socket file {socket_path} does not exist.")
+        else:
+            print(f"Connection failed: {e}")
         sys.exit(1)
     return client_socket
 
@@ -37,19 +56,16 @@ def is_supported_text_file(file_path):
     # Allow shell scripts (.sh) and other plain text files
     if mime_type is None or mime_type.startswith('text'):
         return True
-
-    # Explicitly allow certain extensions like .sh
     if file_path.endswith('.sh'):
         return True
 
-    # Add more extensions here if needed
     return False
 
 
 def send_file_content(file_path, client_socket):
     if not is_supported_text_file(file_path):
         print(f"File type not supported: {file_path}")
-        return False  # Indicate that the file was not sent
+        return False
 
     try:
         # Get the size of the file content
@@ -68,8 +84,13 @@ def send_file_content(file_path, client_socket):
                     break
                 client_socket.sendall(chunk.encode())
 
-        # After sending the file content, receive the server's response
-        response_size_data = client_socket.recv(8)  # Read 8 bytes for the response size
+        # After sending the file content, attempt to receive the server's response
+        try:
+            response_size_data = client_socket.recv(8)
+        except TimeoutError:
+            print("Error: No response from server. The connection timed out.")
+            return False
+
         if not response_size_data:
             print("No response from server.")
             return False
@@ -91,6 +112,10 @@ def send_file_content(file_path, client_socket):
         print(f"File {file_path} not found")
         return False  # Indicate that the file was not sent
 
+    except socket.error as e:
+        print(f"Socket error: {e}")
+        return False
+
 
 def main():
     args = parse_arguments()
@@ -105,3 +130,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
